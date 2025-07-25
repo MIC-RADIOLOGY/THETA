@@ -2,71 +2,60 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Theta Aging Report", layout="centered")
+st.set_page_config(page_title="Aging Report Merger", layout="wide")
 
-st.title("📊 Theta Aging Report Generator")
-st.markdown("Upload your ZWG and USD aging report CSV files below.")
+st.title("📊 Aging Report Merger (ZWL & USD)")
 
-def clean_and_prepare_data(uploaded_file, currency_label):
-    try:
-        # Read raw content
-        content = uploaded_file.read()
-        df_raw = pd.read_csv(io.BytesIO(content), header=None)
+# --- File Upload ---
+zwl_file = st.file_uploader("Upload ZWL Aging CSV", type=["csv"], key="zwl")
+usd_file = st.file_uploader("Upload USD Aging CSV", type=["csv"], key="usd")
 
-        # Find the row that has the most non-null values = likely the header
-        header_row_index = df_raw.notna().sum(axis=1).idxmax()
-        df = df_raw.iloc[header_row_index:].copy()
-        df.columns = df.iloc[0]  # set headers
-        df = df[1:]  # drop the header row now used
+# --- Helper to clean currency columns ---
+def clean_dataframe(df, currency):
+    df = df.copy()
 
-        df = df.dropna(how='all')  # remove fully empty rows
-        df = df.fillna("0.00")  # fill blanks with 0.00
-
-        # Only process numeric columns (skip name columns)
-        for col in df.columns[1:]:
+    # Automatically detect amount-like columns
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.replace('[\$,]', '', regex=True)
             try:
-                df[col] = (
-                    df[col].astype(str)
-                    .str.replace(",", "", regex=False)
-                    .str.replace("$", "", regex=False)
-                    .str.strip()
-                )
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.00)
-            except Exception as err:
-                st.warning(f"⚠️ Column '{col}' could not be cleaned: {err}")
-                df[col] = 0.00  # fallback
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+            except Exception:
+                pass
 
-        df.insert(0, "Currency", currency_label)
-        df.reset_index(drop=True, inplace=True)
-        return df
+    df["Currency"] = currency
+    return df
 
-    except Exception as e:
-        raise ValueError(f"File parsing failed: {e}")
-
-# Uploads
-uploaded_zwg = st.file_uploader("Upload ZWG CSV File", type=["csv"])
-uploaded_usd = st.file_uploader("Upload USD CSV File", type=["csv"])
-
-if uploaded_zwg and uploaded_usd:
+if zwl_file and usd_file:
     try:
-        zwg_data = clean_and_prepare_data(uploaded_zwg, "ZWG")
-        usd_data = clean_and_prepare_data(uploaded_usd, "USD")
+        df_zwl = pd.read_csv(zwl_file)
+        df_usd = pd.read_csv(usd_file)
 
-        combined = pd.concat([zwg_data, usd_data], ignore_index=True)
-        st.success("✅ Aging report created successfully!")
+        df_zwl_clean = clean_dataframe(df_zwl, "ZWL")
+        df_usd_clean = clean_dataframe(df_usd, "USD")
 
-        st.dataframe(combined, use_container_width=True)
+        # Combine both
+        final_df = pd.concat([df_zwl_clean, df_usd_clean], ignore_index=True)
 
-        # Download button
-        csv = combined.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "⬇️ Download Combined Aging Report",
-            data=csv,
-            file_name="Theta_Aging_Report.csv",
-            mime="text/csv"
-        )
+        st.success("✅ Files merged successfully!")
+
+        # --- Show separated dataframes ---
+        tab1, tab2, tab3 = st.tabs(["💵 USD Only", "🪙 ZWL Only", "📋 Combined"])
+
+        with tab1:
+            st.dataframe(df_usd_clean, use_container_width=True)
+
+        with tab2:
+            st.dataframe(df_zwl_clean, use_container_width=True)
+
+        with tab3:
+            st.dataframe(final_df, use_container_width=True)
+
+        # --- Download button ---
+        csv_data = final_df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download Combined Aging Report", csv_data, "combined_aging_report.csv", "text/csv")
 
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Error processing files: {e}")
 else:
-    st.info("⬆️ Please upload both ZWG and USD files to proceed.")
+    st.info("Please upload both ZWL and USD CSV files to proceed.")
