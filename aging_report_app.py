@@ -1,71 +1,44 @@
 import streamlit as st
 import pandas as pd
-import io
 
 st.set_page_config(page_title="Theta Aging Report", layout="centered")
-st.title("📊 Aging Report Generator – Theta")
-st.write("Upload ZWG and USD CSV files to generate the combined aging report.")
 
-zwg_file = st.file_uploader("Upload ZWG CSV", type="csv")
-usd_file = st.file_uploader("Upload USD CSV", type="csv")
+st.title("📊 Theta Aging Report Generator")
+st.markdown("Upload your ZWG and USD CSV files to generate the combined aging report.")
 
-expected_columns = [
-    "Provider", "180 Days Plus", "150 Days", "120 Days", "90 Days",
-    "60 Days", "30 Days", "Current", "Unallocated", "Balance"
-]
+def clean_data(file):
+    raw = pd.read_csv(file, skip_blank_lines=True)
+    # Auto-detect data starting point
+    data_start = raw[raw.columns[0]].first_valid_index()
+    df = raw.iloc[data_start:].copy()
+    df.columns = df.iloc[0]
+    df = df[1:]  # Drop duplicated header row
+    df = df.dropna(subset=[df.columns[0]])  # Drop empty rows
+    df = df.fillna("0.00")
 
-def clean_amount(val):
-    if pd.isna(val):
-        return 0.0
-    val = str(val).replace(",", "").replace("$", "").strip()
-    try:
-        return float(val)
-    except:
-        return 0.0
+    # Clean numeric columns
+    for col in df.columns[1:]:
+        df[col] = df[col].astype(str).str.replace(",", "").str.replace("$", "").str.strip()
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.00)
 
-def prepare_aging_data(uploaded_file):
-    raw = pd.read_csv(uploaded_file)
-    clean = raw.iloc[5:].copy()
-    clean.columns = raw.iloc[4]
-    clean = clean.loc[:, clean.columns.notna()]
-    clean = clean.dropna(subset=[clean.columns[0]])
-    clean.reset_index(drop=True, inplace=True)
-
-    for col in expected_columns:
-        if col not in clean.columns:
-            clean[col] = None
-
-    df = clean[expected_columns].copy()
-    for col in expected_columns[1:-1]:
-        df[col] = df[col].apply(clean_amount)
-    df["Balance"] = df[expected_columns[1:-1]].sum(axis=1)
+    df.reset_index(drop=True, inplace=True)
     return df
 
-if zwg_file and usd_file:
-    with st.spinner("Processing files..."):
-        zwg_df = prepare_aging_data(zwg_file)
-        usd_df = prepare_aging_data(usd_file)
+uploaded_zwg = st.file_uploader("Upload ZWG CSV", type="csv")
+uploaded_usd = st.file_uploader("Upload USD CSV", type="csv")
 
-        blank = pd.DataFrame([[""] * len(expected_columns)], columns=expected_columns)
-        zwg_label = pd.DataFrame([["ZWG"] + [""] * (len(expected_columns) - 1)], columns=expected_columns)
-        usd_label = pd.DataFrame([["USD"] + [""] * (len(expected_columns) - 1)], columns=expected_columns)
+if uploaded_zwg and uploaded_usd:
+    zwg_df = clean_data(uploaded_zwg)
+    usd_df = clean_data(uploaded_usd)
 
-        final_df = pd.concat([
-            zwg_label,
-            zwg_df,
-            blank,
-            usd_label,
-            usd_df
-        ], ignore_index=True)
+    zwg_df.insert(0, "Currency", "ZWG")
+    usd_df.insert(0, "Currency", "USD")
 
-        st.success("✅ Report generated successfully!")
-        st.dataframe(final_df)
+    combined_df = pd.concat([zwg_df, usd_df], ignore_index=True)
 
-        csv_buffer = io.StringIO()
-        final_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            label="📥 Download Combined Aging Report (CSV)",
-            data=csv_buffer.getvalue(),
-            file_name="Combined_Aging_Report_Theta.csv",
-            mime="text/csv"
-        )
+    st.success("✅ Report generated!")
+    st.dataframe(combined_df, use_container_width=True)
+
+    csv = combined_df.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Download Combined Report", data=csv, file_name="Theta_Aging_Report.csv", mime="text/csv")
+
