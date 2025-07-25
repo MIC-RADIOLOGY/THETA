@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import datetime
+import re # Import the re module for regular expressions
 
 st.set_page_config(page_title="Aging Report Merger", layout="wide")
 
@@ -18,7 +19,7 @@ def clean_and_process_df(file_buffer, currency_type):
     Reads the raw CSV content from a file buffer, cleans it by selecting relevant columns,
     removing non-numeric characters from numeric fields, converting them to float,
     adding an 'Unallocated' column, and adding a currency column.
-    It is designed to be robust against slight variations in column presence.
+    It is designed to be robust against slight variations in column presence and data formatting.
     """
     try:
         # Read CSV, skipping the initial header rows (header=5 means row 6 is header)
@@ -33,7 +34,6 @@ def clean_and_process_df(file_buffer, currency_type):
     ]
     
     # Initialize an empty DataFrame with the expected final columns to ensure consistent structure
-    # We'll build this up by adding columns from df_raw or initializing them.
     cleaned_df = pd.DataFrame()
 
     # Process 'Provider' column - it's crucial and should ideally be the first column
@@ -48,17 +48,39 @@ def clean_and_process_df(file_buffer, currency_type):
     else:
         raise ValueError("Could not find 'Provider' column in the CSV or the file is empty. Please check your file format.")
 
-    # Process numeric columns
-    for col in target_numeric_cols:
-        if col in df_raw.columns:
-            # Clean and convert existing numeric columns
-            cleaned_df[col] = df_raw[col].astype(str) \
-                                         .str.replace('$', '', regex=False) \
-                                         .str.replace(',', '', regex=False)
-            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce').fillna(0.0)
+    # Process numeric columns with more robust cleaning
+    for col_idx, col_name in enumerate(target_numeric_cols):
+        # Determine the actual column name in df_raw based on its position in the header
+        # This assumes the relative positions (e.g., 7th, 9th, etc.) are consistent
+        # in the raw CSVs, as identified in previous turns.
+        # This is a more robust way to get the column if its name isn't exactly '180 Days Plus' etc.
+        # We need to map the target_numeric_cols to their actual index in the raw header (header=5)
+        # Based on the snippet:
+        # Provider (0), 180 Days Plus (7), 150 Days (9), 120 Days (12), 90 Days (15), 60 Days (17), 30 Days (19), Current (21), Balance (23)
+        raw_col_index_map = {
+            '180 Days Plus': 7, '150 Days': 9, '120 Days': 12, '90 Days': 15,
+            '60 Days': 17, '30 Days': 19, 'Current': 21, 'Balance': 23
+        }
+        
+        raw_col_actual_name = None
+        if raw_col_index_map[col_name] < len(df_raw.columns):
+            raw_col_actual_name = df_raw.columns[raw_col_index_map[col_name]]
+
+        if raw_col_actual_name and raw_col_actual_name in df_raw.columns:
+            # Convert to string and strip whitespace
+            temp_series = df_raw[raw_col_actual_name].astype(str).str.strip()
+            
+            # Remove parentheses (for negative numbers like "(123.45)")
+            temp_series = temp_series.str.replace(r'[\(\)]', '', regex=True)
+            
+            # Remove commas and dollar signs
+            temp_series = temp_series.str.replace('$', '', regex=False).str.replace(',', '', regex=False)
+            
+            # Convert to numeric, coercing errors to NaN, then fill NaN with 0.0
+            cleaned_df[col_name] = pd.to_numeric(temp_series, errors='coerce').fillna(0.0)
         else:
-            # If a numeric column is missing, add it with 0.0 values
-            cleaned_df[col] = 0.0
+            # If a numeric column is missing or not found at its expected index, add it with 0.0 values
+            cleaned_df[col_name] = 0.0
 
     # Add 'Unallocated' column initialized to 0.0, as per the desired AGING.xlsx format
     cleaned_df['Unallocated'] = 0.0
@@ -73,9 +95,6 @@ def clean_and_process_df(file_buffer, currency_type):
     ]
     
     # Reindex the DataFrame to ensure all columns are present and in the correct order.
-    # This will add any missing columns from final_cols_order as NaN, which we then fill with 0.0.
-    # However, our loop above already ensures numeric_cols and Unallocated are present.
-    # So, this primarily serves to enforce the order.
     cleaned_df = cleaned_df.reindex(columns=final_cols_order, fill_value=0.0)
 
     return cleaned_df
