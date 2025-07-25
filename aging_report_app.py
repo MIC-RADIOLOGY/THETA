@@ -53,7 +53,6 @@ def clean_and_process_df(file_buffer, currency_type):
         # Determine the actual column name in df_raw based on its position in the header
         # This assumes the relative positions (e.g., 7th, 9th, etc.) are consistent
         # in the raw CSVs, as identified in previous turns.
-        # This is a more robust way to get the column if its name isn't exactly '180 Days Plus' etc.
         # We need to map the target_numeric_cols to their actual index in the raw header (header=5)
         # Based on the snippet:
         # Provider (0), 180 Days Plus (7), 150 Days (9), 120 Days (12), 90 Days (15), 60 Days (17), 30 Days (19), Current (21), Balance (23)
@@ -141,20 +140,17 @@ if zwl_file and usd_file:
         # Select only the columns that match the AGING format, excluding 'Currency' for the CSV output
         zwl_data_for_csv = df_zwl_clean[['Provider', '180 Days Plus', '150 Days', '120 Days', '90 Days', '60 Days', '30 Days', 'Current', 'Unallocated', 'Balance']]
         for index, row in zwl_data_for_csv.iterrows():
-            # Prepend two empty columns (,,) and format numeric values to two decimal places
-            formatted_row = [
-                row['Provider'],
-                f"{row['180 Days Plus']:.2f}",
-                f"{row['150 Days']:.2f}",
-                f"{row['120 Days']:.2f}",
-                f"{row['90 Days']:.2f}",
-                f"{row['60 Days']:.2f}",
-                f"{row['30 Days']:.2f}",
-                f"{row['Current']:.2f}",
-                f"{row['Unallocated']:.2f}",
-                f"{row['Balance']:.2f}"
-            ]
-            csv_buffer.write(f',,{",".join(map(str, formatted_row))}\n')
+            # Prepend two empty columns (,,)
+            formatted_row_parts = [row['Provider']]
+            for col in ['180 Days Plus', '150 Days', '120 Days', '90 Days', '60 Days', '30 Days', 'Current']:
+                formatted_row_parts.append(f"{row[col]:.2f}")
+            
+            # Special handling for 'Unallocated': blank if 0.0, else format to 2 decimal places
+            formatted_row_parts.append("" if row['Unallocated'] == 0.0 else f"{row['Unallocated']:.2f}")
+            
+            formatted_row_parts.append(f"{row['Balance']:.2f}")
+            
+            csv_buffer.write(f',,{",".join(map(str, formatted_row_parts))}\n')
 
         csv_buffer.write('\n') # Add a blank line for visual separation between currency sections
 
@@ -162,20 +158,17 @@ if zwl_file and usd_file:
         csv_buffer.write(',,Currency: USD,,,,,,,,,\n')
         usd_data_for_csv = df_usd_clean[['Provider', '180 Days Plus', '150 Days', '120 Days', '90 Days', '60 Days', '30 Days', 'Current', 'Unallocated', 'Balance']]
         for index, row in usd_data_for_csv.iterrows():
-            # Prepend two empty columns (,,) and format numeric values to two decimal places
-            formatted_row = [
-                row['Provider'],
-                f"{row['180 Days Plus']:.2f}",
-                f"{row['150 Days']:.2f}",
-                f"{row['120 Days']:.2f}",
-                f"{row['90 Days']:.2f}",
-                f"{row['60 Days']:.2f}",
-                f"{row['30 Days']:.2f}",
-                f"{row['Current']:.2f}",
-                f"{row['Unallocated']:.2f}",
-                f"{row['Balance']:.2f}"
-            ]
-            csv_buffer.write(f',,{",".join(map(str, formatted_row))}\n')
+            # Prepend two empty columns (,,)
+            formatted_row_parts = [row['Provider']]
+            for col in ['180 Days Plus', '150 Days', '120 Days', '90 Days', '60 Days', '30 Days', 'Current']:
+                formatted_row_parts.append(f"{row[col]:.2f}")
+            
+            # Special handling for 'Unallocated': blank if 0.0, else format to 2 decimal places
+            formatted_row_parts.append("" if row['Unallocated'] == 0.0 else f"{row['Unallocated']:.2f}")
+            
+            formatted_row_parts.append(f"{row['Balance']:.2f}")
+            
+            csv_buffer.write(f',,{",".join(map(str, formatted_row_parts))}\n')
 
         # Get the final CSV string and encode it for download
         csv_data_for_download = csv_buffer.getvalue().encode("utf-8")
@@ -192,3 +185,5 @@ if zwl_file and usd_file:
         st.exception(e) # Display the full exception for debugging
 else:
     st.info("Please upload both ZWL and USD CSV files to proceed.")
+
+ 
