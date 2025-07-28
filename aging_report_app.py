@@ -1,109 +1,85 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
 import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import os
 
-# --- Cleaning function ---
-def clean_dataframe(df, currency):
-    df = df.copy()
-    df.columns = df.columns.str.strip()  # Remove leading/trailing spaces
+def clean_dataframe(df):
+    # Remove commas and convert to numeric
+    df = df.applymap(lambda x: str(x).replace(',', '') if isinstance(x, str) else x)
 
-    for col in df.select_dtypes(include='object').columns:
-        if df[col].str.contains(r'\d', regex=True, na=False).any():
-            df[col] = df[col].astype(str).str.replace(r'[\$,]', '', regex=True)
-            df[col] = pd.to_numeric(df[col], errors='ignore')
+    # Convert to numeric where possible
+    df = df.apply(pd.to_numeric, errors='ignore')
 
-    df["Currency"] = currency
+    # Replace negative numbers with zero
+    df = df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x)
+
     return df
 
-# --- Load CSV file ---
-def load_file(currency):
-    path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-    if not path:
+def load_excel_file(title):
+    file_path = filedialog.askopenfilename(title=title, filetypes=[("Excel files", "*.xlsx *.xls")])
+    return file_path
+
+def save_output_file(default_name="Consolidated_Aging_Report.xlsx"):
+    file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile=default_name,
+                                             filetypes=[("Excel files", "*.xlsx")])
+    return file_path
+
+def main():
+    root = tk.Tk()
+    root.withdraw()
+
+    # Load Sample Layout File
+    messagebox.showinfo("Sample Layout", "Select the SAMPLE layout file.")
+    sample_file = load_excel_file("Select the Sample Layout File")
+    if not sample_file:
         return
-    try:
-        df = pd.read_csv(path)
-        if df.empty:
-            raise ValueError("CSV is empty.")
-        df_clean = clean_dataframe(df, currency)
-        if currency == "ZWL":
-            app_data["zwl"] = df_clean
-            zwl_status.config(text="✅ ZWL File Loaded")
-        else:
-            app_data["usd"] = df_clean
-            usd_status.config(text="✅ USD File Loaded")
-    except Exception as e:
-        messagebox.showerror("Load Error", str(e))
 
-# --- Merge and show data ---
-def merge_and_display():
-    if app_data["zwl"] is None or app_data["usd"] is None:
-        messagebox.showwarning("Missing Files", "Please load both ZWL and USD files.")
+    sample_df = pd.read_excel(sample_file)
+
+    # Load ZWL File
+    messagebox.showinfo("ZWL File", "Select the ZWL aging report.")
+    zwl_file = load_excel_file("Select ZWL File")
+    if not zwl_file:
         return
-    try:
-        zwl_df = app_data["zwl"]
-        usd_df = app_data["usd"]
+    zwl_df = pd.read_excel(zwl_file)
 
-        # Align columns if identical
-        if set(zwl_df.columns) == set(usd_df.columns):
-            usd_df = usd_df[zwl_df.columns]
-
-        combined_df = pd.concat([zwl_df, usd_df], ignore_index=True)
-        app_data["combined"] = combined_df
-
-        # Display in table
-        table.delete(*table.get_children())
-        table["columns"] = list(combined_df.columns)
-        table["show"] = "headings"
-        for col in combined_df.columns:
-            table.heading(col, text=col)
-            table.column(col, width=100)
-
-        for _, row in combined_df.iterrows():
-            table.insert("", "end", values=list(row))
-
-        messagebox.showinfo("Success", "Merged and displayed data.")
-    except Exception as e:
-        messagebox.showerror("Merge Error", str(e))
-
-# --- Save merged file ---
-def save_combined():
-    df = app_data.get("combined")
-    if df is None:
-        messagebox.showwarning("No Data", "Merge the files first.")
+    # Load USD File
+    messagebox.showinfo("USD File", "Select the USD aging report.")
+    usd_file = load_excel_file("Select USD File")
+    if not usd_file:
         return
-    path = filedialog.asksaveasfilename(defaultextension=".csv",
-                                        filetypes=[("CSV Files", "*.csv")])
-    if path:
+    usd_df = pd.read_excel(usd_file)
+
+    # Clean Data
+    zwl_df = clean_dataframe(zwl_df)
+    usd_df = clean_dataframe(usd_df)
+
+    # Remove "Balance" column if exists
+    if 'Balance' in zwl_df.columns:
+        zwl_df = zwl_df.drop(columns=['Balance'])
+    if 'Balance' in usd_df.columns:
+        usd_df = usd_df.drop(columns=['Balance'])
+
+    # Add Currency Labels
+    zwl_df.insert(0, 'Currency', 'ZWL')
+    usd_df.insert(0, 'Currency', 'USD')
+
+    # Combine both dataframes
+    combined_df = pd.concat([zwl_df, usd_df], ignore_index=True)
+
+    # Match Sample Layout Columns
+    sample_columns = list(sample_df.columns)
+    combined_df = combined_df.reindex(columns=sample_columns)
+
+    # Save the result
+    output_path = save_output_file()
+    if output_path:
         try:
-            df.to_csv(path, index=False)
-            messagebox.showinfo("Saved", f"File saved: {path}")
+            combined_df.to_excel(output_path, index=False)
+            messagebox.showinfo("Success", f"Consolidated report saved successfully:\n{output_path}")
         except Exception as e:
-            messagebox.showerror("Save Error", str(e))
+            messagebox.showerror("Error", f"Failed to save file:\n{str(e)}")
 
-# --- GUI setup ---
-app = tk.Tk()
-app.title("Aging Report Merger")
-app.geometry("900x600")
+if __name__ == "__main__":
+    main()
 
-app_data = {"zwl": None, "usd": None, "combined": None}
-
-# --- Top Controls ---
-frame = tk.Frame(app)
-frame.pack(pady=10)
-
-tk.Button(frame, text="📂 Load ZWL CSV", command=lambda: load_file("ZWL")).grid(row=0, column=0, padx=10)
-tk.Button(frame, text="📂 Load USD CSV", command=lambda: load_file("USD")).grid(row=0, column=1, padx=10)
-
-zwl_status = tk.Label(frame, text="No ZWL file", fg="red")
-usd_status = tk.Label(frame, text="No USD file", fg="red")
-zwl_status.grid(row=1, column=0)
-usd_status.grid(row=1, column=1)
-
-tk.Button(app, text="🔁 Merge & Display", command=merge_and_display, width=30).pack(pady=10)
-tk.Button(app, text="💾 Save Merged CSV", command=save_combined, width=30).pack()
-
-# --- Table for displaying merged data ---
-table = ttk.Treeview(app)
-table.pack(expand=True, fill="both", padx=10, pady=10)
-
-app.mainloop()
