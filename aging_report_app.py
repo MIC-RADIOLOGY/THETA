@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook, Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 st.set_page_config(page_title="Aging Report Merger", layout="wide")
@@ -13,18 +13,16 @@ def clean_dataframe(df):
     df = df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x)
     return df
 
-def detect_valid_header(file, max_check=10):
-    for skip in range(max_check):
-        df = pd.read_excel(file, skiprows=skip, nrows=1)
-        if df.columns.notna().sum() > 1:
-            return skip
-    return 0
-
-def read_excel_clean(file):
-    skiprows = detect_valid_header(file)
-    df = pd.read_excel(file, skiprows=skiprows)
-    df.columns = df.columns.astype(str)
-    return df
+def read_excel_properly(file):
+    raw = pd.read_excel(file, header=None)  # read all rows as raw data
+    for i in range(len(raw)):
+        row = raw.iloc[i]
+        valid = row.dropna().astype(str).tolist()
+        if any(col.lower() in str(valid).lower() for col in ['customer', 'name', 'account']):
+            df = pd.read_excel(file, skiprows=i)
+            df.columns = df.columns.astype(str)
+            return df
+    raise ValueError("Could not detect valid header row. Please check the format of your file.")
 
 def to_excel_with_formulas(df, sample_file):
     sample_wb = load_workbook(sample_file, data_only=False)
@@ -51,14 +49,13 @@ def to_excel_with_formulas(df, sample_file):
     output.seek(0)
     return output
 
-# --- File Uploads ---
+# --- Uploads ---
 st.header("📂 Step 1: Upload Files")
 
 sample_file = st.file_uploader("📄 Upload Sample Layout File (with Formulas)", type=["xlsx"])
 zwl_file = st.file_uploader("💱 Upload ZWL Aging Report", type=["xlsx"])
 usd_file = st.file_uploader("💲 Upload USD Aging Report", type=["xlsx"])
 
-# --- App Logic ---
 if not sample_file:
     st.warning("Please upload the sample layout file.")
 elif not zwl_file:
@@ -72,21 +69,21 @@ else:
         sample_ws = sample_wb.active
         sample_headers = [cell.value for cell in sample_ws[1]]
 
-        # Load and clean ZWL
-        zwl_df = read_excel_clean(zwl_file)
+        # Read & clean ZWL
+        zwl_df = read_excel_properly(zwl_file)
         zwl_df = clean_dataframe(zwl_df)
         zwl_df.insert(0, "Currency", "ZWL")
         if 'Balance' in zwl_df.columns:
             zwl_df.drop(columns=['Balance'], inplace=True)
 
-        # Load and clean USD
-        usd_df = read_excel_clean(usd_file)
+        # Read & clean USD
+        usd_df = read_excel_properly(usd_file)
         usd_df = clean_dataframe(usd_df)
         usd_df.insert(0, "Currency", "USD")
         if 'Balance' in usd_df.columns:
             usd_df.drop(columns=['Balance'], inplace=True)
 
-        # Merge and match layout
+        # Merge & match layout
         merged_df = pd.concat([zwl_df, usd_df], ignore_index=True)
         merged_df = merged_df.reindex(columns=sample_headers)
 
@@ -104,3 +101,7 @@ else:
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
+
+  
+
+      
