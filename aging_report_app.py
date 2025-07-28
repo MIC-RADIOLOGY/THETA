@@ -14,11 +14,17 @@ def clean_dataframe(df):
     return df
 
 def read_excel_properly(file):
-    raw = pd.read_excel(file, header=None)  # read all rows as raw data
+    raw = pd.read_excel(file, header=None)
+    st.write("🔍 Raw Data Preview (first 10 rows):")
+    st.dataframe(raw.head(10))
+
+    keywords = ['customer', 'name', 'account', 'client', 'acct']
+
     for i in range(len(raw)):
         row = raw.iloc[i]
         valid = row.dropna().astype(str).tolist()
-        if any(col.lower() in str(valid).lower() for col in ['customer', 'name', 'account']):
+        # Check if any keyword is in any cell (case-insensitive)
+        if any(any(kw in cell.lower() for kw in keywords) for cell in valid):
             df = pd.read_excel(file, skiprows=i)
             df.columns = df.columns.astype(str)
             return df
@@ -101,7 +107,3 @@ else:
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
-
-  
-
-      
