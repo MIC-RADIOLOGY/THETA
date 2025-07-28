@@ -22,7 +22,7 @@ def detect_valid_header(file, max_check=10):
 
 def read_excel_clean(file):
     skiprows = detect_valid_header(file)
-    df = pd.read_excel(file, skiprows=skip)
+    df = pd.read_excel(file, skiprows=skiprows)
     df.columns = df.columns.astype(str)
     return df
 
@@ -58,7 +58,7 @@ sample_file = st.file_uploader("📄 Upload Sample Layout File (with Formulas)",
 zwl_file = st.file_uploader("💱 Upload ZWL Aging Report", type=["xlsx"])
 usd_file = st.file_uploader("💲 Upload USD Aging Report", type=["xlsx"])
 
-# Show status
+# --- App Logic ---
 if not sample_file:
     st.warning("Please upload the sample layout file.")
 elif not zwl_file:
@@ -104,5 +104,3 @@ else:
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
-
-    
