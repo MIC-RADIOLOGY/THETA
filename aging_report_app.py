@@ -26,7 +26,8 @@ def parse_ageing_file(df):
     numeric_cols = [col for col in df.columns if col.lower() != "provider"]
 
     for col in numeric_cols:
-        df[col] = df[col].astype(str).str.replace("[^0-9.-]", "", regex=True)
+        df[col] = df[col].astype(str).str.replace(r"[^\d.,-]", "", regex=True)
+        df[col] = df[col].str.replace(",", "")
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
         df[col] = df[col].apply(lambda x: 0 if x < 0 else x)
 
@@ -95,4 +96,3 @@ if usd_file and zwg_file and sample_file:
         st.error(f"❌ Error: {e}")
 else:
     st.info("⬆️ Upload all 3 files (ZWG, USD, and Sample) to begin.")
-
