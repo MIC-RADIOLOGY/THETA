@@ -5,74 +5,99 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 st.set_page_config(page_title="📊 Aging Report Merger", layout="wide")
-st.title("📊 Aging Report Merger (ZWL & USD Matching Sample Layout)")
+st.title("📊 AI-Powered Aging Report Merger")
 
-# Upload files
-usd_file = st.file_uploader("Upload USD Aging Report", type=["xlsx"])
-zwg_file = st.file_uploader("Upload ZWG Aging Report", type=["xlsx"])
-sample_file = st.file_uploader("Upload Sample Layout File", type=["xlsx"])
+# --- Smart Cleaning ---
+def parse_ageing_file(df):
+    # Drop empty columns
+    df = df.dropna(axis=1, how="all")
+    df = df.dropna(axis=0, how="all")
 
-def clean_and_prepare(df):
-    df = df.dropna(how="all")  # Remove fully empty rows
-    df.columns = df.iloc[0]    # First row as header
-    df = df[1:]
-    df = df.fillna(0)
-    df = df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x)  # Replace negatives
-    return df
+    # Find header row: the one containing "Provider"
+    header_row_idx = df[df.apply(lambda row: row.astype(str).str.contains("Provider", case=False).any(), axis=1)].index[0]
 
-def create_output_file(zwg_df, usd_df):
+    # Set headers
+    df.columns = df.iloc[header_row_idx]
+    df = df[header_row_idx + 1:]
+
+    # Strip column names and drop empty ones
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~df.columns.duplicated()]
+
+    # Replace negative and non-numeric with 0
+    df = df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x)
+    
+    # Convert everything that looks like a string number to float
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace("[^0-9.-]", "", regex=True), errors='ignore')
+    
+    return df.fillna(0)
+
+# --- Create Excel Output ---
+def generate_excel_output(zwg_df, usd_df):
     wb = Workbook()
     ws = wb.active
     ws.title = "Consolidated Aging"
 
-    # Title
+    # Write ZWL
     ws.append(["ZWL AGING"])
     for r in dataframe_to_rows(zwg_df, index=False, header=True):
         ws.append(r)
 
-    ws.append([])  # Empty row
+    ws.append([])
     ws.append(["USD AGING"])
     for r in dataframe_to_rows(usd_df, index=False, header=True):
         ws.append(r)
 
-    # Save to buffer
     output = BytesIO()
     wb.save(output)
     output.seek(0)
     return output
 
+# --- Upload UI ---
+usd_file = st.file_uploader("📤 Upload PROJECT USD", type=["xlsx"])
+zwg_file = st.file_uploader("📤 Upload PROJECT ZWG", type=["xlsx"])
+sample_file = st.file_uploader("📤 Upload Sample Layout File", type=["xlsx"])
+
 if usd_file and zwg_file and sample_file:
-    # Read and clean data
     try:
-        zwg_raw = pd.read_excel(zwg_file, header=None)
-        usd_raw = pd.read_excel(usd_file, header=None)
+        # Load Excel
+        usd_df_raw = pd.read_excel(usd_file, header=None)
+        zwg_df_raw = pd.read_excel(zwg_file, header=None)
 
-        zwg_df = clean_and_prepare(zwg_raw)
-        usd_df = clean_and_prepare(usd_raw)
+        # Smart parse
+        usd_df = parse_ageing_file(usd_df_raw)
+        zwg_df = parse_ageing_file(zwg_df_raw)
 
-        # Match column names from sample (assume first non-empty row is the structure)
-        sample_raw = pd.read_excel(sample_file, header=None)
-        sample_raw = sample_raw.dropna(how="all")
-        sample_columns = sample_raw.iloc[0].dropna().tolist()
+        # Reorder columns to match sample layout
+        sample_df_raw = pd.read_excel(sample_file, header=None)
+        sample_df_raw = sample_df_raw.dropna(axis=0, how="all")
+        layout_headers = sample_df_raw.iloc[1].dropna().tolist()
 
-        zwg_df = zwg_df[[col for col in zwg_df.columns if col in sample_columns]]
-        usd_df = usd_df[[col for col in usd_df.columns if col in sample_columns]]
+        # Keep only relevant columns
+        usd_df = usd_df[[col for col in layout_headers if col in usd_df.columns]]
+        zwg_df = zwg_df[[col for col in layout_headers if col in zwg_df.columns]]
 
-        # Reorder columns to match sample
-        zwg_df = zwg_df.reindex(columns=sample_columns)
-        usd_df = usd_df.reindex(columns=sample_columns)
+        # Reorder
+        usd_df = usd_df.reindex(columns=layout_headers)
+        zwg_df = zwg_df.reindex(columns=layout_headers)
 
-        output = create_output_file(zwg_df, usd_df)
+        # Replace negative and nulls with 0
+        usd_df = usd_df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x).fillna(0)
+        zwg_df = zwg_df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x).fillna(0)
 
-        st.success("✅ Files successfully merged and cleaned!")
+        # Output file
+        output_excel = generate_excel_output(zwg_df, usd_df)
+
+        st.success("✅ Merged and formatted successfully!")
         st.download_button(
             label="📥 Download Consolidated Aging Report",
-            data=output,
+            data=output_excel,
             file_name="Consolidated_Aging_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     except Exception as e:
-        st.error(f"❌ Error processing files: {e}")
+        st.error(f"❌ Error: {e}")
 else:
-    st.info("⬆️ Please upload all three files to begin processing.")
+    st.info("⬆️ Upload all 3 files (ZWG, USD, and Sample) to begin.")
