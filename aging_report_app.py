@@ -7,44 +7,45 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 st.set_page_config(page_title="📊 Aging Report Merger", layout="wide")
 st.title("📊 AI-Powered Aging Report Merger")
 
-# --- Smart Cleaning ---
+# --- ✅ Updated Function to Parse and Clean File Correctly ---
 def parse_ageing_file(df):
-    # Drop empty columns
-    df = df.dropna(axis=1, how="all")
-    df = df.dropna(axis=0, how="all")
+    # Drop empty rows/columns
+    df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
 
-    # Find header row: the one containing "Provider"
-    header_row_idx = df[df.apply(lambda row: row.astype(str).str.contains("Provider", case=False).any(), axis=1)].index[0]
+    # Detect header row (contains "Provider")
+    header_idx = df[df.apply(lambda row: row.astype(str).str.contains("Provider", case=False).any(), axis=1)].index[0]
+    df.columns = df.iloc[header_idx]
+    df = df[header_idx + 1:]
 
-    # Set headers
-    df.columns = df.iloc[header_row_idx]
-    df = df[header_row_idx + 1:]
-
-    # Strip column names and drop empty ones
+    # Clean headers
     df.columns = [str(c).strip() for c in df.columns]
     df = df.loc[:, ~df.columns.duplicated()]
+    df = df.fillna(0)
 
-    # Replace negative and non-numeric with 0
-    df = df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x)
-    
-    # Convert everything that looks like a string number to float
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col].astype(str).str.replace("[^0-9.-]", "", regex=True), errors='ignore')
-    
-    return df.fillna(0)
+    # Identify numeric columns (skip "Provider")
+    numeric_cols = [col for col in df.columns if col.lower() != "provider"]
 
-# --- Create Excel Output ---
+    for col in numeric_cols:
+        df[col] = df[col].astype(str).str.replace("[^0-9.-]", "", regex=True)
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        df[col] = df[col].apply(lambda x: 0 if x < 0 else x)
+
+    return df
+
+# --- Create Excel Output File ---
 def generate_excel_output(zwg_df, usd_df):
     wb = Workbook()
     ws = wb.active
     ws.title = "Consolidated Aging"
 
-    # Write ZWL
+    # ZWL Section
     ws.append(["ZWL AGING"])
     for r in dataframe_to_rows(zwg_df, index=False, header=True):
         ws.append(r)
 
-    ws.append([])
+    ws.append([])  # empty line
+
+    # USD Section
     ws.append(["USD AGING"])
     for r in dataframe_to_rows(usd_df, index=False, header=True):
         ws.append(r)
@@ -54,39 +55,32 @@ def generate_excel_output(zwg_df, usd_df):
     output.seek(0)
     return output
 
-# --- Upload UI ---
+# --- File Upload UI ---
 usd_file = st.file_uploader("📤 Upload PROJECT USD", type=["xlsx"])
 zwg_file = st.file_uploader("📤 Upload PROJECT ZWG", type=["xlsx"])
 sample_file = st.file_uploader("📤 Upload Sample Layout File", type=["xlsx"])
 
+# --- Processing ---
 if usd_file and zwg_file and sample_file:
     try:
-        # Load Excel
         usd_df_raw = pd.read_excel(usd_file, header=None)
         zwg_df_raw = pd.read_excel(zwg_file, header=None)
+        sample_df_raw = pd.read_excel(sample_file, header=None)
 
-        # Smart parse
         usd_df = parse_ageing_file(usd_df_raw)
         zwg_df = parse_ageing_file(zwg_df_raw)
 
-        # Reorder columns to match sample layout
-        sample_df_raw = pd.read_excel(sample_file, header=None)
+        # Get layout structure from sample file
         sample_df_raw = sample_df_raw.dropna(axis=0, how="all")
         layout_headers = sample_df_raw.iloc[1].dropna().tolist()
 
-        # Keep only relevant columns
+        # Filter and reorder columns
         usd_df = usd_df[[col for col in layout_headers if col in usd_df.columns]]
         zwg_df = zwg_df[[col for col in layout_headers if col in zwg_df.columns]]
-
-        # Reorder
         usd_df = usd_df.reindex(columns=layout_headers)
         zwg_df = zwg_df.reindex(columns=layout_headers)
 
-        # Replace negative and nulls with 0
-        usd_df = usd_df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x).fillna(0)
-        zwg_df = zwg_df.applymap(lambda x: 0 if isinstance(x, (int, float)) and x < 0 else x).fillna(0)
-
-        # Output file
+        # Create downloadable file
         output_excel = generate_excel_output(zwg_df, usd_df)
 
         st.success("✅ Merged and formatted successfully!")
@@ -101,3 +95,4 @@ if usd_file and zwg_file and sample_file:
         st.error(f"❌ Error: {e}")
 else:
     st.info("⬆️ Upload all 3 files (ZWG, USD, and Sample) to begin.")
+
